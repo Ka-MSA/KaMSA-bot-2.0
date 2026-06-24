@@ -1,18 +1,24 @@
 import os
 import json
-import io
-import requests
+from dotenv import load_dotenv
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-# Load credentials from environment variable
-creds_dict = json.loads(os.environ['GOOGLE_SERVICE_ACCOUNT'])
+# 1. Force load the .env file variables into memory first!
+load_dotenv()
+
+# 2. Extract and load credentials safely
+service_account_json = os.getenv('GOOGLE_SERVICE_ACCOUNT')
+if not service_account_json:
+    raise ValueError("GOOGLE_SERVICE_ACCOUNT is not set in environment variables.")
+
+creds_dict = json.loads(service_account_json)
 creds = service_account.Credentials.from_service_account_info(creds_dict)
 
 # Initialize Drive API
 drive_service = build('drive', 'v3', credentials=creds)
 
-# Replace this with your main folder ID
+# Your main folder ID
 MAIN_FOLDER_ID = '1-5ocbVU17S13rUgbaxi5kEWOXjAJWTsf'
 
 def get_subfolders(folder_id):

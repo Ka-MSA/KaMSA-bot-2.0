@@ -1,6 +1,6 @@
 from file_data import files_by_section
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from utils import send_file_as_document  # Shared tool
+from .utils import send_file_as_document  # Look in the current folder
 
 def register_menu_handler(bot):
     @bot.message_handler(commands=['menu'])
@@ -50,10 +50,10 @@ def register_menu_handler(bot):
         filename = call.data.split("|", 1)[1]
         for section in files_by_section.values():
             if filename in section:
-                # FIX: Extract the nested 'id' string field safely 
+                # FIX: Extract the nested 'id' string field safely
                 file_info = section[filename]
                 file_target = file_info['id'] if isinstance(file_info, dict) else file_info
-                
+
                 # Forward to the stream downloader tool
                 send_file_as_document(bot, call.message.chat.id, filename, file_target)
                 return
