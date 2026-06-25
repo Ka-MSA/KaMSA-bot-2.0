@@ -39,7 +39,7 @@ def register_menu_handler(bot):
         return keyboard
 
     # --- 3. DYNAMIC EXPLORER INTERACTION LISTENER ---
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("browse|"))
+   @bot.callback_query_handler(func=lambda call: call.data.startswith("browse|"))
     def handle_browsing(call):
         target_folder_id = call.data.split("|", 1)[1]
         node = get_folder_node(target_folder_id)
@@ -48,10 +48,20 @@ def register_menu_handler(bot):
             bot.answer_callback_query(call.id, "Directory layer missing.")
             return
             
+        # Base header format
+        display_text = f"📂 Current Folder: *{node['name']}*\n\n"
+        
+        # DYNAMIC INJECTION: If a team member uploaded a .txt note into this folder, 
+        # its content will display here natively to the user!
+        if node.get('folder_note'):
+            display_text += f"{node['folder_note']}\n\n"
+            
+        display_text += "Choose an option below:"
+        
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            text=f"📂 Current Folder: *{node['name']}*",
+            text=display_text,
             reply_markup=build_explorer_keyboard(target_folder_id),
             parse_mode="Markdown"
         )
