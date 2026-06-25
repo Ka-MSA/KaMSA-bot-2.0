@@ -1,6 +1,5 @@
 import os
 import json
-import time
 import requests
 import io
 from dotenv import load_dotenv
@@ -24,38 +23,29 @@ drive_service = build('drive', 'v3', credentials=creds)
 # Your main folder ID
 MAIN_FOLDER_ID = '1-5ocbVU17S13rUgbaxi5kEWOXjAJWTsf'
 
-# --- In-Memory Caching Cache Layer Config ---
-_cached_data = None
-_last_fetch_time = 0.0
-CACHE_DURATION = 3600  # 1 hour in seconds
-
-def get_subfolders(folder_id):
-    query = f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed = false"
+def get_items_in_folder(folder_id):
+    """Fetches both files and subfolders in a single API call to reduce latency."""
+    query = f"'{folder_id}' in parents and trashed = false"
     results = drive_service.files().list(
         q=query,
         orderBy='name',
-        fields="files(id, name)"
+        fields="files(id, name, mimeType)"
     ).execute()
     return results.get('files', [])
 
-def get_files_in_folder(folder_id):
-    query = f"'{folder_id}' in parents and mimeType!='application/vnd.google-apps.folder' and trashed = false"
-    results = drive_service.files().list(
-        q=query,
-        orderBy='name',
-        fields="files(id, name)"
-    ).execute()
-    return results.get('files', [])
-
-def build_files_by_section():
-    files_by_section = {}
-    subfolders = get_subfolders(MAIN_FOLDER_ID)
-
-    for folder in subfolders:
-        section_name = folder['name']
-        files = get_files_in_folder(folder['id'])
+def crawl_folder_recursive(folder_id, current_path=""):
+    """
+    Recursively travels through all layers of folders, flattening the structure
+    into section keys based on their folder path.
+    """
+    local_files_map = {}
+    items = get_items_in_folder(folder_id)
+    
+    subfolders = [i for i in items if i['mimeType'] == 'application/vnd.google-apps.folder']
+    files = [i for i in items if i['mimeType'] != 'application/vnd.google-apps.folder']
+    
+    if files:
         files_dict = {}
-
         for file in files:
             file_id = file['id']
             file_name = file['name']
@@ -65,35 +55,32 @@ def build_files_by_section():
                 'name': file_name,
                 'url': download_url
             }
-
-        files_by_section[section_name] = dict(sorted(files_dict.items()))
-
-    return dict(sorted(files_by_section.items()))
-
-
-# --- Live Wrapper Method Called by Handlers ---
-def get_live_files_by_section():
-    """
-    Safely retrieves the directory map from cache or crawls the live 
-    Google Drive API if the 1-hour cache window has elapsed.
-    """
-    global _cached_data, _last_fetch_time
-    current_time = time.time()
-    
-    # Check if cache is missing or older than 1 hour
-    if _cached_data is None or (current_time - _last_fetch_time) > CACHE_DURATION:
-        print("🔄 Cache expired or empty. Crawling live Google Drive API metadata...")
-        _cached_data = build_files_by_section()
-        _last_fetch_time = current_time
-    else:
-        print(f"⚡ Serving directory map directly from memory cache ({int(CACHE_DURATION - (current_time - _last_fetch_time))}s left).")
+        section_key = current_path if current_path else "Main Folder Files"
+        local_files_map[section_key] = dict(sorted(files_dict.items()))
         
-    return _cached_data
+    for folder in subfolders:
+        next_path = f"{current_path}/{folder['name']}" if current_path else folder['name']
+        child_maps = crawl_folder_recursive(folder['id'], next_path)
+        local_files_map.update(child_maps)
+        
+    return local_files_map
+
+def build_files_by_section():
+    """Triggers our recursive engine starting from your main root folder."""
+    print("📂 Building static multi-layer directory map from Google Drive...")
+    raw_structure = crawl_folder_recursive(MAIN_FOLDER_ID)
+    return dict(sorted(raw_structure.items()))
 
 
-# Fallback backwards-compatibility mapping
-# Handlers should use get_live_files_by_section() instead of accessing this directly
-files_by_section = {} 
+# --- STATIC BOOT ALLOCATION ---
+# This executes EXACTLY ONCE when the container boots. 
+# Zero background loops, zero CPU overhead during runtime.
+_global_directory_cache = build_files_by_section()
+
+def get_live_files_by_section():
+    """Returns the pre-compiled static dictionary instantly from RAM."""
+    return _global_directory_cache
+
 
 def download_file(file_id):
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
