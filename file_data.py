@@ -1,72 +1,84 @@
 import os
 import json
+import time
 from dotenv import load_dotenv
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-# 1. Force load the .env file variables into memory first!
 load_dotenv()
 
-# 2. Extract and load credentials safely
 service_account_json = os.getenv('GOOGLE_SERVICE_ACCOUNT')
 if not service_account_json:
     raise ValueError("GOOGLE_SERVICE_ACCOUNT is not set in environment variables.")
 
 creds_dict = json.loads(service_account_json)
 creds = service_account.Credentials.from_service_account_info(creds_dict)
-
-# Initialize Drive API
 drive_service = build('drive', 'v3', credentials=creds)
 
-# Your main folder ID
 MAIN_FOLDER_ID = '1-5ocbVU17S13rUgbaxi5kEWOXjAJWTsf'
 
-def get_subfolders(folder_id):
-    query = f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed = false"
+# In-memory storage cache registries
+DRIVE_TREE = {}
+_LAST_UPDATE_HOUR = -1
+
+def sync_entire_drive_structure(folder_id):
+    """Recursively walks Google Drive and returns a nested node dictionary."""
+    node = {"folders": {}, "files": {}}
+    
+    query = f"'{folder_id}' in parents and trashed = false"
     results = drive_service.files().list(
         q=query,
         orderBy='name',
-        fields="files(id, name)"
+        fields="files(id, name, mimeType)"
     ).execute()
-    return results.get('files', [])
+    items = results.get('files', [])
 
-def get_files_in_folder(folder_id):
-    query = f"'{folder_id}' in parents and mimeType!='application/vnd.google-apps.folder' and trashed = false"
-    results = drive_service.files().list(
-        q=query,
-        orderBy='name',
-        fields="files(id, name)"
-    ).execute()
-    return results.get('files', [])
-
-def build_files_by_section():
-    files_by_section = {}
-    subfolders = get_subfolders(MAIN_FOLDER_ID)
-
-    for folder in subfolders:
-        section_name = folder['name']
-        files = get_files_in_folder(folder['id'])
-        files_dict = {}
-
-        for file in files:
-            file_id = file['id']
-            file_name = file['name']
-            download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-            files_dict[file_name] = {
-                'id': file_id,
-                'name': file_name,
-                'url': download_url
+    for item in items:
+        if item['mimeType'] == 'application/vnd.google-apps.folder':
+            node["folders"][item['id']] = {
+                "name": item['name'],
+                "content": sync_entire_drive_structure(item['id'])
             }
+        else:
+            node["files"][item['id']] = {
+                "name": item['name']
+            }
+    return node
 
-        files_by_section[section_name] = dict(sorted(files_dict.items()))
+def get_live_drive_data():
+    """Returns directory structure. Syncs once at the start of every hour."""
+    global DRIVE_TREE, _LAST_UPDATE_HOUR
+    current_hour = time.localtime().tm_hour
+    
+    if DRIVE_TREE == {} or current_hour != _LAST_UPDATE_HOUR:
+        try:
+            DRIVE_TREE = sync_entire_drive_structure(MAIN_FOLDER_ID)
+            _LAST_UPDATE_HOUR = current_hour
+        except Exception:
+            # Silent fallback: keep serving existing memory cache if API drops offline
+            if DRIVE_TREE == {}:
+                DRIVE_TREE = {"folders": {}, "files": {}}
+                
+    return DRIVE_TREE
 
-    return dict(sorted(files_by_section.items()))
+def find_node_by_id(tree_node, target_id):
+    """Traverses down the tree map to locate a specific subfolder configuration."""
+    if target_id == MAIN_FOLDER_ID:
+        return tree_node
+    if target_id in tree_node["folders"]:
+        return tree_node["folders"][target_id]["content"]
+    for sub in tree_node["folders"].values():
+        found = find_node_by_id(sub["content"], target_id)
+        if found:
+            return found
+    return None
 
-# Exported dictionary
-files_by_section = build_files_by_section()
-
-def download_file(file_id):
-    url = f"https://drive.google.com/uc?export=download&id={file_id}"
-    response = requests.get(url)
-    response.raise_for_status()
-    return io.BytesIO(response.content)
+def find_file_globally(tree_node, file_id):
+    """Scans down to search for a file name matching a target ID key."""
+    if file_id in tree_node["files"]:
+        return tree_node["files"][file_id]["name"]
+    for sub in tree_node["folders"].values():
+        found = find_file_globally(sub["content"], file_id)
+        if found:
+            return found
+    return None
