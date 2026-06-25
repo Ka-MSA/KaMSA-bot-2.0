@@ -1,5 +1,8 @@
 import os
 import json
+import time
+import requests
+import io
 from dotenv import load_dotenv
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -20,6 +23,11 @@ drive_service = build('drive', 'v3', credentials=creds)
 
 # Your main folder ID
 MAIN_FOLDER_ID = '1-5ocbVU17S13rUgbaxi5kEWOXjAJWTsf'
+
+# --- In-Memory Caching Cache Layer Config ---
+_cached_data = None
+_last_fetch_time = 0.0
+CACHE_DURATION = 3600  # 1 hour in seconds
 
 def get_subfolders(folder_id):
     query = f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed = false"
@@ -62,8 +70,30 @@ def build_files_by_section():
 
     return dict(sorted(files_by_section.items()))
 
-# Exported dictionary
-files_by_section = build_files_by_section()
+
+# --- Live Wrapper Method Called by Handlers ---
+def get_live_files_by_section():
+    """
+    Safely retrieves the directory map from cache or crawls the live 
+    Google Drive API if the 1-hour cache window has elapsed.
+    """
+    global _cached_data, _last_fetch_time
+    current_time = time.time()
+    
+    # Check if cache is missing or older than 1 hour
+    if _cached_data is None or (current_time - _last_fetch_time) > CACHE_DURATION:
+        print("🔄 Cache expired or empty. Crawling live Google Drive API metadata...")
+        _cached_data = build_files_by_section()
+        _last_fetch_time = current_time
+    else:
+        print(f"⚡ Serving directory map directly from memory cache ({int(CACHE_DURATION - (current_time - _last_fetch_time))}s left).")
+        
+    return _cached_data
+
+
+# Fallback backwards-compatibility mapping
+# Handlers should use get_live_files_by_section() instead of accessing this directly
+files_by_section = {} 
 
 def download_file(file_id):
     url = f"https://drive.google.com/uc?export=download&id={file_id}"
