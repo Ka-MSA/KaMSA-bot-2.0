@@ -31,13 +31,14 @@ def get_items_in_folder(folder_id):
 def build_tree_recursive(folder_id, folder_name):
     """
     Builds a structured tree profile where each folder node explicitly knows 
-    its files, its child folders, and its parent connection.
+    its files, its child folders, its parent connection, and any embedded descriptive text notes.
     """
     node = {
         'name': folder_name,
         'id': folder_id,
         'subfolders': {},  # folder_id -> folder_name
-        'files': {}        # filename -> {id, name, url}
+        'files': {},       # filename -> {id, name, url}
+        'folder_note': None # Raw text string read from any .txt files inside
     }
     
     items = get_items_in_folder(folder_id)
@@ -45,6 +46,16 @@ def build_tree_recursive(folder_id, folder_name):
     for item in items:
         if item['mimeType'] == 'application/vnd.google-apps.folder':
             node['subfolders'][item['id']] = item['name']
+        elif item['name'].lower().endswith('.txt'):
+            # It's a description note! Let's download its text contents directly into RAM
+            try:
+                url = f"https://drive.google.com/uc?export=download&id={item['id']}"
+                response = requests.get(url)
+                if response.status_code == 200:
+                    # Save the raw string directly into this directory node level
+                    node['folder_note'] = response.text.strip()
+            except Exception as e:
+                print(f"⚠️ Failed to read text file note {item['name']}: {e}")
         else:
             node['files'][item['name']] = {
                 'id': item['id'],
