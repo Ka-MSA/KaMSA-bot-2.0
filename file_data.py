@@ -62,23 +62,42 @@ def get_live_drive_data():
     return DRIVE_TREE
 
 def find_node_by_id(tree_node, target_id):
-    """Traverses down the tree map to locate a specific subfolder configuration."""
+    """
+    Deeply traverses down the tree structure to find the dictionary 
+    corresponding to target_id, no matter how nested it is.
+    """
+    if not tree_node:
+        return None
+        
+    # If the root node matches the target
     if target_id == MAIN_FOLDER_ID:
         return tree_node
-    if target_id in tree_node["folders"]:
+        
+    # Check if it's an immediate child subfolder
+    if "folders" in tree_node and target_id in tree_node["folders"]:
         return tree_node["folders"][target_id]["content"]
-    for sub in tree_node["folders"].values():
-        found = find_node_by_id(sub["content"], target_id)
-        if found:
-            return found
+        
+    # Recursively look deeper down into grandchildren folders
+    if "folders" in tree_node:
+        for sub in tree_node["folders"].values():
+            found = find_node_by_id(sub["content"], target_id)
+            if found is not None:
+                return found
+                
     return None
 
 def find_file_globally(tree_node, file_id):
-    """Scans down to search for a file name matching a target ID key."""
-    if file_id in tree_node["files"]:
+    """Deeply searches the tree down to the leaves to find a file name by its ID."""
+    if not tree_node:
+        return None
+        
+    if "files" in tree_node and file_id in tree_node["files"]:
         return tree_node["files"][file_id]["name"]
-    for sub in tree_node["folders"].values():
-        found = find_file_globally(sub["content"], file_id)
-        if found:
-            return found
+        
+    if "folders" in tree_node:
+        for sub in tree_node["folders"].values():
+            found = find_file_globally(sub["content"], file_id)
+            if found is not None:
+                return found
+                
     return None
