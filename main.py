@@ -1,7 +1,6 @@
 import telebot
 from config import BOT_TOKEN
 from handlers.start_handler import register_start_handler
-from handlers.list_handler import register_list_handler
 from handlers.menu_handler import register_menu_handler
 
 
