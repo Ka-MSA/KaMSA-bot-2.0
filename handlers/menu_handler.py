@@ -23,11 +23,11 @@ def register_menu_handler(bot):
         if not node:
             return keyboard
 
-        # Layer 1: Render subfolders at this current level (Prefix emoji 📁)
+        # Layer 1: Subfolders at this level (Prefix 📁)
         for sub_id, sub_name in sorted(node['subfolders'].items(), key=lambda x: x[1]):
             keyboard.add(InlineKeyboardButton(text=f"📁 {sub_name}", callback_data=f"browse|{sub_id}"))
             
-        # Layer 2: Render files side-by-side at this same level (Prefix emoji 📄)
+        # Layer 2: Files at this level (Prefix 📄)
         for file_name in sorted(node['files'].keys()):
             keyboard.add(InlineKeyboardButton(text=f"📄 {file_name}", callback_data=f"get|{file_name}"))
             
@@ -39,7 +39,7 @@ def register_menu_handler(bot):
         return keyboard
 
     # --- 3. DYNAMIC EXPLORER INTERACTION LISTENER ---
-   @bot.callback_query_handler(func=lambda call: call.data.startswith("browse|"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("browse|"))
     def handle_browsing(call):
         target_folder_id = call.data.split("|", 1)[1]
         node = get_folder_node(target_folder_id)
@@ -48,11 +48,8 @@ def register_menu_handler(bot):
             bot.answer_callback_query(call.id, "Directory layer missing.")
             return
             
-        # Base header format
         display_text = f"📂 Current Folder: *{node['name']}*\n\n"
         
-        # DYNAMIC INJECTION: If a team member uploaded a .txt note into this folder, 
-        # its content will display here natively to the user!
         if node.get('folder_note'):
             display_text += f"{node['folder_note']}\n\n"
             
