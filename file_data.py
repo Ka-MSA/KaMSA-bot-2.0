@@ -15,6 +15,7 @@ if not service_account_json:
 creds_dict = json.loads(service_account_json)
 creds = service_account.Credentials.from_service_account_info(creds_dict)
 
+# Global Drive API client instance
 drive_service = build('drive', 'v3', credentials=creds)
 
 MAIN_FOLDER_ID = '1-5ocbVU17S13rUgbaxi5kEWOXjAJWTsf'
@@ -37,7 +38,7 @@ def build_tree_recursive(folder_id, folder_name):
         'name': folder_name,
         'id': folder_id,
         'subfolders': {},  # folder_id -> folder_name
-        'files': {},       # filename -> {id, name, url}
+        'files': {},       # filename -> {id, name, mimeType}
         'folder_note': None # Raw text string read from any .txt files inside
     }
     
@@ -52,15 +53,15 @@ def build_tree_recursive(folder_id, folder_name):
                 url = f"https://drive.google.com/uc?export=download&id={item['id']}"
                 response = requests.get(url)
                 if response.status_code == 200:
-                    # Save the raw string directly into this directory node level
                     node['folder_note'] = response.text.strip()
             except Exception as e:
                 print(f"⚠️ Failed to read text file note {item['name']}: {e}")
         else:
+            # Save the full identity node mapping instead of just string URLs
             node['files'][item['name']] = {
                 'id': item['id'],
                 'name': item['name'],
-                'url': f"https://drive.google.com/uc?export=download&id={item['id']}"
+                'mimeType': item.get('mimeType', '')
             }
             
     return node
@@ -82,7 +83,7 @@ def build_entire_drive_map():
     cache_worker(MAIN_FOLDER_ID, "Main Menu")
     return flat_registry
 
-# --- Static Memory Storage ---
+# --- Static Memory Storage Boot ---
 _drive_tree_registry = build_entire_drive_map()
 
 def get_folder_node(folder_id):
@@ -92,15 +93,9 @@ def get_folder_node(folder_id):
 def get_root_folder_id():
     return MAIN_FOLDER_ID
 
-def find_file_by_name_global(filename):
-    """Scans cache to find a file target ID when requested by name string."""
+def find_file_node_global(filename):
+    """Scans cache to find a full file dictionary node matching the requested name string."""
     for node in _drive_tree_registry.values():
         if filename in node['files']:
-            return node['files'][filename]['id']
+            return node['files'][filename]
     return None
-
-def download_file(file_id):
-    url = f"https://drive.google.com/uc?export=download&id={file_id}"
-    response = requests.get(url)
-    response.raise_for_status()
-    return io.BytesIO(response.content)
