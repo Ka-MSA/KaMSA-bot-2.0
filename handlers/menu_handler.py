@@ -1,4 +1,4 @@
-from file_data import get_folder_node, get_root_folder_id, find_file_by_name_global
+from file_data import get_folder_node, get_root_folder_id, find_file_node_global
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from .utils import send_file_as_document
 
@@ -66,7 +66,7 @@ def register_menu_handler(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("get|"))
     def send_file(call):
         filename = call.data.split("|", 1)[1]
-        file_target_id = find_file_by_name_global(filename)
+        file_target_id = find_file_node_global(filename)
         
         if file_target_id:
             bot.answer_callback_query(call.id, "⏳ Fetching file stream...")
