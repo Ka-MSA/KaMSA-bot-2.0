@@ -2,23 +2,29 @@ import io
 from file_data import drive_service  # Reuse your authenticated Drive client
 from googleapiclient.http import MediaIoBaseDownload
 
-def send_file_as_document(bot, chat_id, filename, file_id_or_url):
+def send_file_as_document(bot, chat_id, filename, file_node):
     """
     Downloads file content directly via Google Drive API media streams into memory
-    and uploads it natively to Telegram. Bypasses the 20MB URL download ceiling.
+    and uploads it natively to Telegram. Integrates type checking and handles fallback links.
     """
     status_msg = bot.send_message(chat_id, f"⏳ Fetching '{filename}' from Drive...")
+    file_id = file_node['id']
+    mime_type = file_node.get('mimeType', '')
     
     try:
-        # Extract file ID if a full URL was passed, otherwise use it directly
-        file_id = file_id_or_url
-        if "id=" in file_id_or_url:
-            file_id = file_id_or_url.split("id=")[1].split("&")[0]
-        elif "/d/" in file_id_or_url:
-            file_id = file_id_or_url.split("/d/")[1].split("/")[0]
+        # 1. Determine download type based on Google Drive MIME Type
+        if mime_type == 'application/vnd.google-apps.presentation':
+            # Handle native Google Slides templates by exporting them cleanly to PPTX format
+            request = drive_service.files().export_media(
+                fileId=file_id, 
+                mimeType='application/vnd.openxmlformats-officedocument.presentationml.presentation'
+            )
+            if not filename.lower().endswith('.pptx') and not filename.lower().endswith('.ppt'):
+                filename = f"{filename}.pptx"
+        else:
+            # Handle standard raw uploaded binary files (.ppt, .pptx, .pdf, .docx, etc.)
+            request = drive_service.files().get_media(fileId=file_id)
 
-        # Request raw file media via Drive API
-        request = drive_service.files().get_media(fileId=file_id)
         file_buffer = io.BytesIO()
         downloader = MediaIoBaseDownload(file_buffer, request)
         
@@ -34,15 +40,17 @@ def send_file_as_document(bot, chat_id, filename, file_id_or_url):
         bot.send_document(
             chat_id=chat_id,
             document=file_buffer,
-            visible_file_name=f"{filename}.pdf"
+            visible_file_name=filename  # Dynamically maintains the authentic format type extension
         )
         bot.delete_message(chat_id, status_msg.message_id)
         
     except Exception as e:
-        # Fallback if Drive API media download fails
-        fallback_url = f"https://drive.google.com/uc?export=download&id={file_id}" if "http" not in file_id_or_url else file_id_or_url
+        print(f"⚠️ Authenticated download stream failed: {e}")
+        # --- THE LIVE RUNTIME FAIL-SAFE ---
+        fallback_url = f"https://drive.google.com/uc?export=download&id={file_id}"
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=status_msg.message_id,
-            text=f"❌ Direct stream failed. Download manually here:\n{fallback_url}"
+            text=f"❌ Direct stream failed. Download manually here:\n🔗 [{filename}]({fallback_url})",
+            parse_mode="Markdown"
         )
