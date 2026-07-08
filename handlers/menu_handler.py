@@ -1,16 +1,16 @@
 from file_data import (
     get_folder_node, 
     get_root_folder_id, 
-    find_file_node_global, 
     get_short_id, 
-    get_real_id_from_short
+    get_real_id_from_short,
+    get_file_token,
+    find_file_node_by_token
 )
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from .utils import send_file_as_document
 
 def register_menu_handler(bot):
     
-    # --- 1. COMMAND TRIGGER ---
     @bot.message_handler(commands=['menu'])
     def show_menu(message):
         root_id = get_root_folder_id()
@@ -21,7 +21,6 @@ def register_menu_handler(bot):
             parse_mode="Markdown"
         )
 
-    # --- 2. THE WINDOW BUILDER ENGINE ---
     def build_explorer_keyboard(folder_id):
         keyboard = InlineKeyboardMarkup()
         node = get_folder_node(folder_id)
@@ -29,16 +28,18 @@ def register_menu_handler(bot):
         if not node:
             return keyboard
 
-        # Layer 1: Subfolders at this level (Prefix 📁)
+        # Layer 1: Subfolders
         for sub_id, sub_name in sorted(node['subfolders'].items(), key=lambda x: x[1]):
             short_sub_id = get_short_id(sub_id)
             keyboard.add(InlineKeyboardButton(text=f"📁 {sub_name}", callback_data=f"browse|{short_sub_id}"))
             
-        # Layer 2: Files at this level (Prefix 📄)
+        # Layer 2: Files (Now completely tokenized and compressed! 📄)
         for file_name in sorted(node['files'].keys()):
-            keyboard.add(InlineKeyboardButton(text=f"📄 {file_name}", callback_data=f"get|{file_name}"))
+            file_token = get_file_token(file_name)
+            if file_token:
+                keyboard.add(InlineKeyboardButton(text=f"📄 {file_name}", callback_data=f"get|{file_token}"))
             
-        # Layer 3: Contextual Back Button
+        # Layer 3: Back Button
         if folder_id != get_root_folder_id():
             parent_id = node.get('parent_id') or get_root_folder_id()
             short_parent_id = get_short_id(parent_id)
@@ -46,12 +47,10 @@ def register_menu_handler(bot):
             
         return keyboard
 
-    # --- 3. DYNAMIC EXPLORER INTERACTION LISTENER ---
     @bot.callback_query_handler(func=lambda call: call.data.startswith("browse|"))
     def handle_browsing(call):
         short_key = call.data.split("|", 1)[1]
         target_folder_id = get_real_id_from_short(short_key)
-        
         node = get_folder_node(target_folder_id)
         
         if not node:
@@ -59,7 +58,6 @@ def register_menu_handler(bot):
             return
             
         display_text = f"📂 Current Folder: *{node['name']}*\n\n"
-        
         if node.get('folder_note'):
             display_text += f"{node['folder_note']}\n\n"
             
@@ -79,10 +77,12 @@ def register_menu_handler(bot):
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("get|"))
     def send_file(call):
-        filename = call.data.split("|", 1)[1]
-        file_node = find_file_node_global(filename)
+        file_token = call.data.split("|", 1)[1]
+        # Look up using the unique token ID instead of relying on the raw name string
+        file_node = find_file_node_by_token(file_token)
         
         if file_node:
+            filename = file_node['name']
             bot.answer_callback_query(call.id, "⏳ Fetching original file...")
             send_file_as_document(bot, call.message.chat.id, filename, file_node)
         else:
