@@ -15,7 +15,7 @@ if not service_account_json:
 creds_dict = json.loads(service_account_json)
 creds = service_account.Credentials.from_service_account_info(creds_dict)
 
-# Global Drive API client instance
+# Global authenticated Drive API client instance
 drive_service = build('drive', 'v3', credentials=creds)
 
 MAIN_FOLDER_ID = '1-5ocbVU17S13rUgbaxi5kEWOXjAJWTsf'
@@ -48,7 +48,6 @@ def build_tree_recursive(folder_id, folder_name):
         if item['mimeType'] == 'application/vnd.google-apps.folder':
             node['subfolders'][item['id']] = item['name']
         elif item['name'].lower().endswith('.txt'):
-            # It's a description note! Let's download its text contents directly into RAM
             try:
                 url = f"https://drive.google.com/uc?export=download&id={item['id']}"
                 response = requests.get(url)
@@ -57,7 +56,6 @@ def build_tree_recursive(folder_id, folder_name):
             except Exception as e:
                 print(f"⚠️ Failed to read text file note {item['name']}: {e}")
         else:
-            # Save the full identity node mapping instead of just string URLs
             node['files'][item['name']] = {
                 'id': item['id'],
                 'name': item['name'],
@@ -75,7 +73,6 @@ def build_entire_drive_map():
         node['parent_id'] = parent_id
         flat_registry[folder_id] = node
         
-        # Recursively crawl deep child layers
         for subfolder_id, subfolder_name in node['subfolders'].items():
             cache_worker(subfolder_id, subfolder_name, parent_id=folder_id)
             
@@ -86,9 +83,27 @@ def build_entire_drive_map():
 # --- Static Memory Storage Boot ---
 _drive_tree_registry = build_entire_drive_map()
 
+# --- Dynamic Short Key Button Compression Map ---
+_short_id_map = {}
+for index, real_id in enumerate(_drive_tree_registry.keys()):
+    short_key = f"f{index}"
+    _short_id_map[short_key] = real_id
+
+def get_short_id(real_id):
+    """Finds the short compressed key for a real Google Drive ID."""
+    for short_key, rid in _short_id_map.items():
+        if rid == real_id:
+            return short_key
+    return real_id
+
+def get_real_id_from_short(short_key):
+    """Translates a short key back to the true massive Google Drive ID."""
+    return _short_id_map.get(short_key, short_key)
+
 def get_folder_node(folder_id):
     """Instantly fetches a specific directory layer from RAM."""
-    return _drive_tree_registry.get(folder_id)
+    real_id = get_real_id_from_short(folder_id)
+    return _drive_tree_registry.get(real_id)
 
 def get_root_folder_id():
     return MAIN_FOLDER_ID
