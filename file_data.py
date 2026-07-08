@@ -15,7 +15,6 @@ if not service_account_json:
 creds_dict = json.loads(service_account_json)
 creds = service_account.Credentials.from_service_account_info(creds_dict)
 
-# Global authenticated Drive API client instance
 drive_service = build('drive', 'v3', credentials=creds)
 
 MAIN_FOLDER_ID = '1-5ocbVU17S13rUgbaxi5kEWOXjAJWTsf'
@@ -30,20 +29,15 @@ def get_items_in_folder(folder_id):
     return results.get('files', [])
 
 def build_tree_recursive(folder_id, folder_name):
-    """
-    Builds a structured tree profile where each folder node explicitly knows 
-    its files, its child folders, its parent connection, and any embedded descriptive text notes.
-    """
     node = {
         'name': folder_name,
         'id': folder_id,
         'subfolders': {},  # folder_id -> folder_name
         'files': {},       # filename -> {id, name, mimeType}
-        'folder_note': None # Raw text string read from any .txt files inside
+        'folder_note': None
     }
     
     items = get_items_in_folder(folder_id)
-    
     for item in items:
         if item['mimeType'] == 'application/vnd.google-apps.folder':
             node['subfolders'][item['id']] = item['name']
@@ -65,7 +59,6 @@ def build_tree_recursive(folder_id, folder_name):
     return node
 
 def build_entire_drive_map():
-    """Crawls all layers and stores them indexed flat by folder_id for O(1) lookups."""
     flat_registry = {}
     
     def cache_worker(folder_id, folder_name, parent_id=None):
@@ -83,34 +76,50 @@ def build_entire_drive_map():
 # --- Static Memory Storage Boot ---
 _drive_tree_registry = build_entire_drive_map()
 
-# --- Dynamic Short Key Button Compression Map ---
-_short_id_map = {}
-for index, real_id in enumerate(_drive_tree_registry.keys()):
-    short_key = f"f{index}"
-    _short_id_map[short_key] = real_id
+# --- Unified Token Storage Map ---
+_short_id_map = {}   # short_token -> real_id or filename
+_file_lookup_map = {} # short_token -> file_node_dict
+
+token_index = 0
+
+# Generate safe tokens for all items inside RAM
+for folder_real_id, node in _drive_tree_registry.items():
+    # Tokenize folders
+    folder_token = f"d{token_index}"
+    _short_id_map[folder_token] = folder_real_id
+    token_index += 1
+    
+    # Tokenize individual files securely
+    for filename, file_node in node['files'].items():
+        file_token = f"x{token_index}"
+        _short_id_map[file_token] = filename
+        _file_lookup_map[file_token] = file_node
+        token_index += 1
 
 def get_short_id(real_id):
-    """Finds the short compressed key for a real Google Drive ID."""
-    for short_key, rid in _short_id_map.items():
-        if rid == real_id:
-            return short_key
+    """Finds token for a folder ID."""
+    for token, rid in _short_id_map.items():
+        if rid == real_id and token.startswith('d'):
+            return token
     return real_id
 
+def get_file_token(filename):
+    """Finds token for a filename."""
+    for token, fname in _short_id_map.items():
+        if fname == filename and token.startswith('x'):
+            return token
+    return None
+
 def get_real_id_from_short(short_key):
-    """Translates a short key back to the true massive Google Drive ID."""
     return _short_id_map.get(short_key, short_key)
 
 def get_folder_node(folder_id):
-    """Instantly fetches a specific directory layer from RAM."""
     real_id = get_real_id_from_short(folder_id)
     return _drive_tree_registry.get(real_id)
 
 def get_root_folder_id():
     return MAIN_FOLDER_ID
 
-def find_file_node_global(filename):
-    """Scans cache to find a full file dictionary node matching the requested name string."""
-    for node in _drive_tree_registry.values():
-        if filename in node['files']:
-            return node['files'][filename]
-    return None
+def find_file_node_by_token(token):
+    """Instantly delivers file metadata dictionary matching its unique token key."""
+    return _file_lookup_map.get(token)
